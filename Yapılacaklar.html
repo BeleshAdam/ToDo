@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Yapılacaklar</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mute:#6b6b6b;--line:#ddd;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#181818;--fg:#eee;--mute:#999;--line:#3a3a3a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#181818;--fg:#eee;--mute:#999;--line:#3a3a3a;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1040px;margin:0 auto;padding:16px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}
+.cols>section{min-width:0}
+h1{font-size:1.2rem;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+h2{font-size:1rem;margin:22px 0 8px}
+h3{font-size:.85rem;color:var(--mute);font-weight:normal;margin:0 0 4px}
+ul{list-style:none;margin:0;padding:0}
+ul ul{margin-left:22px;border-left:1px solid var(--line);padding-left:10px}
+li{padding:3px 0}
+.row{display:flex;gap:8px;align-items:center}
+.row label{flex:1}
+.done{text-decoration:line-through;color:var(--mute)}
+.mute{color:var(--mute);font-size:.9rem}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.three>div{min-width:0}
+.opts,.line{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.line{margin-top:6px}
+input[type=text],input[type=number],select,button.b{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px 8px}
+.big{width:100%;box-sizing:border-box;font-size:1.1rem;padding:10px}
+.line .big{width:auto;flex:1;min-width:0}
+input[type=number]{width:4.5em}
+button.b{cursor:pointer}
+button.link{background:none;border:0;color:var(--mute);font:inherit;font-size:.85rem;cursor:pointer;padding:0 4px}
+</style>
+</head>
+<body>
+<main>
+<div class="cols">
+  <section>
+    <h1>Günlük</h1>
+    <div id="dlist"></div>
+    <h2 id="dtitle">Görev ekle</h2>
+    <div id="dform"></div>
+  </section>
+  <section>
+    <h1>Genel</h1>
+    <div id="gform"></div>
+    <div id="glist"></div>
+  </section>
+</div>
+</main>
+<script>
+var KEY="todo-taslak-v1",S={daily:[],done:{},general:[]},editD=null,editG=null,adding=null,confirmId=null;
+try{var r=localStorage.getItem(KEY);if(r){var p=JSON.parse(r);if(p&&p.daily&&p.general)S=p;}}catch(e){}
+S.daily.forEach(function(t){if(!t.type)t.type=t.every?"every":"once";if(!t.days)t.days=[];});
+var WD=[1,2,3,4,5,6,0],WN={1:"Pzt",2:"Sal",3:"Çar",4:"Per",5:"Cum",6:"Cmt",0:"Paz"};
+function $(i){return document.getElementById(i);}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function uid(){return Math.random().toString(36).slice(2,10);}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function ds(d){var m=d.getMonth()+1,g=d.getDate();return d.getFullYear()+"-"+(m<10?"0":"")+m+"-"+(g<10?"0":"")+g;}
+function fromS(s){var a=s.split("-");return new Date(+a[0],+a[1]-1,+a[2]);}
+function addDays(d,n){return new Date(d.getFullYear(),d.getMonth(),d.getDate()+n);}
+function diff(a,b){return Math.round((fromS(b)-fromS(a))/864e5);}
+function label(d){return d.toLocaleDateString("tr-TR",{weekday:"long",day:"numeric",month:"long"});}
+function occurs(t,day){
+  var n=diff(t.start,day);
+  if(t.type==="once")return n===0;
+  if(n<0)return false;
+  if(t.type==="every")return n%(t.every||1)===0;
+  return t.days.indexOf(fromS(day).getDay())>=0;
+}
+function meta(t){
+  if(t.type==="every")return t.every===1?"her gün":"her "+t.every+" günde bir";
+  if(t.type==="week")return WD.filter(function(d){return t.days.indexOf(d)>=0;}).map(function(d){return WN[d];}).join(", ");
+  return"";
+}
+function byId(l,id){for(var i=0;i<l.length;i++)if(l[i].id===id)return l[i];return null;}
+function find(l,id){for(var i=0;i<l.length;i++){if(l[i].id===id)return l[i];var f=find(l[i].children,id);if(f)return f;}return null;}
+function removeNode(l,id){for(var i=0;i<l.length;i++){if(l[i].id===id){l.splice(i,1);return true;}if(removeNode(l[i].children,id))return true;}return false;}
+
+/* GÜNLÜK */
+function ctl(id){return'<button class="link" data-act="dedit" data-id="'+id+'">düzenle</button><button class="link" data-act="ddel" data-id="'+id+'">sil</button>';}
+function renderDList(){
+  var now=new Date(),today=ds(now),h='<h2 style="margin-top:0">Bugün · '+esc(label(now))+'</h2><ul>',any=false;
+  S.daily.forEach(function(t){
+    if(!occurs(t,today))return;any=true;
+    var k=t.id+"|"+today,c=!!S.done[k];
+    h+='<li class="row"><label><input type="checkbox" data-act="dchk" data-k="'+k+'"'+(c?" checked":"")+'> <span class="'+(c?"done":"")+'">'+esc(t.title)+'</span></label><span class="mute">'+meta(t)+'</span>'+ctl(t.id)+'</li>';
+  });
+  if(!any)h+='<li class="mute">Bugün için görev yok.</li>';
+  h+='</ul><h2>Önümüzdeki 3 gün</h2><div class="three">';
+  for(var j=1;j<=3;j++){
+    var dd=addDays(now,j),s=ds(dd),it=S.daily.filter(function(t){return occurs(t,s);});
+    h+='<div><h3>'+esc(label(dd))+'</h3><ul>'+(it.length?it.map(function(t){return'<li>'+esc(t.title)+'<br>'+ctl(t.id)+'</li>';}).join(""):'<li class="mute">—</li>')+'</ul></div>';
+  }
+  $("dlist").innerHTML=h+'</div>';
+}
+function dayOpts(sel){
+  var now=new Date(),h="",found=false;
+  for(var i=0;i<=7;i++){var d=addDays(now,i),v=ds(d);if(v===sel)found=true;
+    h+='<option value="'+v+'"'+(v===sel?" selected":"")+'>'+(i===0?"Bugün":i===1?"Yarın":esc(label(d)))+'</option>';}
+  if(!found)h='<option value="'+sel+'" selected>'+esc(label(fromS(sel)))+'</option>'+h;
+  return h;
+}
+function renderDForm(){
+  var t=editD?byId(S.daily,editD):null;
+  if(editD&&!t)editD=null;
+  var type=t?t.type:"once",sel=t?t.start:ds(new Date()),ev=t&&t.every?t.every:1,days=t?t.days:[];
+  $("dtitle").textContent=t?"Görevi düzenle":"Görev ekle";
+  $("dform").innerHTML='<form data-form="daily"><input class="big" type="text" name="title" placeholder="Görev adı" value="'+esc(t?t.title:"")+'" required>'
+   +'<div class="opts"><select name="type">'
+   +[["once","Tek seferlik"],["every","Her N günde bir"],["week","Haftanın günleri"]].map(function(o){return'<option value="'+o[0]+'"'+(o[0]===type?" selected":"")+'>'+o[1]+'</option>';}).join("")
+   +'</select><select name="day" data-show="once every">'+dayOpts(sel)+'</select>'
+   +'<span data-show="every">her <input type="number" name="every" min="1" value="'+ev+'"> günde bir</span>'
+   +'<span data-show="week">'+WD.map(function(d){return'<label><input type="checkbox" name="wd" value="'+d+'"'+(days.indexOf(d)>=0?" checked":"")+'> '+WN[d]+'</label>';}).join(" ")+'</span>'
+   +'<button class="b">'+(t?"Kaydet":"Ekle")+'</button>'+(t?'<button type="button" class="b" data-act="cancelD">İptal</button>':"")
+   +'<span class="mute" data-msg></span></div></form>';
+  syncType();
+}
+function syncType(){
+  var f=document.querySelector('[data-form="daily"]');if(!f)return;
+  var ty=f.elements.type.value;
+  f.querySelectorAll("[data-show]").forEach(function(e){e.hidden=e.dataset.show.split(" ").indexOf(ty)<0;});
+}
+
+/* GENEL */
+function nodes(l){
+  if(!l.length)return"";
+  return"<ul>"+l.map(function(t){
+    var s='<li><div class="row"><label><input type="checkbox" data-act="gchk" data-id="'+t.id+'"'+(t.done?" checked":"")+'> <span class="'+(t.done?"done":"")+'">'+esc(t.title)+'</span></label>'
+      +'<button class="link" data-act="sub" data-id="'+t.id+'">+ alt görev</button><button class="link" data-act="gedit" data-id="'+t.id+'">düzenle</button>';
+    s+=confirmId===t.id?'<span class="mute">Silinsin mi?</span><button class="link" data-act="gdelyes" data-id="'+t.id+'">evet</button><button class="link" data-act="gdelno">hayır</button>'
+      :'<button class="link" data-act="gdel" data-id="'+t.id+'">sil</button>';
+    s+='</div>';
+    if(adding===t.id)s+='<form class="line" data-form="sub" data-id="'+t.id+'"><input class="big" type="text" name="title" placeholder="Alt görev" required><button class="b">Ekle</button></form>';
+    return s+nodes(t.children)+"</li>";
+  }).join("")+"</ul>";
+}
+function renderGList(){$("glist").innerHTML=S.general.length?nodes(S.general):'<div class="mute">Henüz görev yok.</div>';}
+function renderGForm(){
+  var t=editG?find(S.general,editG):null;
+  if(editG&&!t)editG=null;
+  $("gform").innerHTML='<form class="line" data-form="root"><input class="big" type="text" name="title" placeholder="'+(t?"Görev adı":"Yeni görev")+'" value="'+esc(t?t.title:"")+'" required><button class="b">'+(t?"Kaydet":"Ekle")+'</button>'+(t?'<button type="button" class="b" data-act="cancelG">İptal</button>':"")+'</form>';
+}
+function renderAll(){renderDList();renderDForm();renderGList();renderGForm();}
+
+document.addEventListener("click",function(e){
+  var a=e.target.closest("[data-act]");if(!a)return;
+  var act=a.dataset.act,id=a.dataset.id;
+  if(act==="dedit"){editD=id;renderDForm();$("dform").scrollIntoView({block:"nearest"});}
+  else if(act==="cancelD"){editD=null;renderDForm();}
+  else if(act==="ddel"){
+    S.daily=S.daily.filter(function(t){return t.id!==id;});
+    Object.keys(S.done).forEach(function(k){if(k.indexOf(id+"|")===0)delete S.done[k];});
+    if(editD===id)editD=null;
+    save();renderDList();renderDForm();
+  }
+  else if(act==="sub"){adding=adding===id?null:id;renderGList();}
+  else if(act==="gedit"){editG=id;renderGForm();}
+  else if(act==="cancelG"){editG=null;renderGForm();}
+  else if(act==="gdel"){confirmId=id;renderGList();}
+  else if(act==="gdelno"){confirmId=null;renderGList();}
+  else if(act==="gdelyes"){removeNode(S.general,id);confirmId=null;save();renderGList();renderGForm();}
+});
+document.addEventListener("change",function(e){
+  var a=e.target.dataset.act;
+  if(a==="dchk"){var k=e.target.dataset.k;if(e.target.checked)S.done[k]=1;else delete S.done[k];save();renderDList();}
+  else if(a==="gchk"){var n=find(S.general,e.target.dataset.id);if(n){n.done=e.target.checked;save();renderGList();}}
+  else if(e.target.name==="type")syncType();
+});
+document.addEventListener("submit",function(e){
+  e.preventDefault();
+  var f=e.target,kind=f.dataset.form,title=f.elements.title.value.trim();
+  if(!title)return;
+  if(kind==="daily"){
+    var type=f.elements.type.value,t=editD?byId(S.daily,editD):null,rec={title:title,type:type};
+    if(type==="week"){
+      var days=[].map.call(f.querySelectorAll('input[name="wd"]:checked'),function(x){return+x.value;});
+      if(!days.length){f.querySelector("[data-msg]").textContent="En az bir gün seç.";return;}
+      rec.days=days;rec.every=0;rec.start=(t&&t.type==="week")?t.start:ds(new Date());
+    }else{
+      rec.days=[];rec.start=f.elements.day.value;
+      rec.every=type==="every"?Math.max(1,parseInt(f.elements.every.value,10)||1):0;
+    }
+    if(t)Object.assign(t,rec);else S.daily.push(Object.assign({id:uid()},rec));
+    editD=null;save();renderDList();renderDForm();
+  }else if(kind==="root"){
+    var n=editG?find(S.general,editG):null;
+    if(n)n.title=title;else S.general.push({id:uid(),title:title,done:false,children:[]});
+    editG=null;save();renderGList();renderGForm();
+  }else if(kind==="sub"){
+    var p=find(S.general,f.dataset.id);
+    if(p)p.children.push({id:uid(),title:title,done:false,children:[]});
+    adding=null;save();renderGList();
+  }
+});
+renderAll();
+</script>
+</body>
+</html>
